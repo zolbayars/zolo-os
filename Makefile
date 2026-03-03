@@ -27,7 +27,7 @@
 # ---------------------------------------------------------------------------
 LLVM_PREFIX = /opt/homebrew/opt/llvm/bin
 CC          = $(LLVM_PREFIX)/clang
-LD          = $(LLVM_PREFIX)/ld.lld
+LD          = /opt/homebrew/bin/ld.lld
 ASM         = nasm
 QEMU        = qemu-system-i386
 

@@ -28,29 +28,29 @@ SECTIONS {
     . = 1M;
 
     /* Code sections - .multiboot first so the header is in the first 8 KiB */
-    .text BLOCK(4K) : ALIGN(4K) {
+    .text : ALIGN(4K) {
         *(.multiboot)
         *(.text)
     }
 
     /* Read-only data (string literals, lookup tables, etc.) */
-    .rodata BLOCK(4K) : ALIGN(4K) {
+    .rodata : ALIGN(4K) {
         *(.rodata)
         *(.rodata.*)
     }
 
     /* Initialized read-write data */
-    .data BLOCK(4K) : ALIGN(4K) {
+    .data : ALIGN(4K) {
         *(.data)
     }
 
     /* Uninitialized data (zeroed by the bootloader per multiboot spec) */
-    .bss BLOCK(4K) : ALIGN(4K) {
+    .bss : ALIGN(4K) {
         *(COMMON)
         *(.bss)
     }
 
     /* This symbol lets our C code know where the kernel ends in memory.
-     * We'll use it on Day 3 to know where free physical memory begins. */
+     * Used later by the physical memory manager to find free RAM. */
     _kernel_end = .;
 }
