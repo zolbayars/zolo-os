@@ -2,24 +2,53 @@
 ; boot.asm — Multiboot Header and Kernel Entry Point
 ; =============================================================================
 ;
-; This is the VERY FIRST code that executes when ZoloOS boots.
+; This is the VERY FIRST code that runs when ZoloOS boots. Not kernel_main —
+; this file. The CPU jumps here before any C code has had a chance to run.
 ;
-; Boot sequence (what happens before _start runs):
-;   1. QEMU starts and simulates power-on
-;   2. The virtual BIOS initializes hardware
-;   3. QEMU's built-in bootloader scans the first 8 KiB of our binary
-;      looking for the multiboot magic number (0x1BADB002)
-;   4. Once found, it loads the binary into memory at 1 MiB (as our
-;      linker script specifies) and jumps to _start
+; ANALOGY: Think of this file as the "handoff zone" in a relay race. The
+; bootloader (QEMU's built-in loader) runs the first leg: it powers on the
+; hardware, sets up a safe CPU mode, and finds our kernel binary in memory.
+; Then it hands the baton to _start (defined below), which does a few small
+; setup steps before passing control to our C kernel.
 ;
-; What the bootloader guarantees when _start runs:
-;   - CPU is in 32-bit protected mode  (we can address 4 GiB of RAM)
-;   - A20 line is enabled              (memory above 1 MiB is accessible)
-;   - Paging is DISABLED               (virtual addr == physical addr for now)
-;   - Interrupts are DISABLED          (no keyboard/timer until WE set them up)
-;   - EAX = 0x2BADB002                 (magic value confirming multiboot boot)
-;   - EBX = pointer to multiboot info  (has memory map, boot device info, etc.)
-;   - No stack exists yet              (we MUST create one before calling C)
+; BOOT SEQUENCE — what happens before _start runs:
+;   1. QEMU starts and simulates a PC powering on
+;   2. The virtual BIOS runs POST (hardware self-check)
+;   3. QEMU's built-in bootloader scans the first 8 KiB of our binary,
+;      looking for a specific 4-byte magic number (0x1BADB002) — this is
+;      the Multiboot standard: a way for bootloaders to recognize OS kernels
+;   4. Once found, it loads our binary into RAM at 1 MiB and jumps to _start
+;
+; WHAT THE BOOTLOADER GUARANTEES when _start begins:
+;
+;   32-bit protected mode — The CPU has been switched out of the ancient
+;     "real mode" (which was limited to 1 MiB of memory) into a modern mode
+;     where we can address the full 4 GiB address space. Think of it as
+;     switching from a 16-bit app to a 32-bit app.
+;
+;   A20 line enabled — A hardware quirk from the 1980s: an address line
+;     called A20 was historically gated off to maintain compatibility with
+;     old software. The bootloader enables it so memory above 1 MiB is
+;     accessible. (If it wasn't enabled, addresses would "wrap around".)
+;
+;   Paging DISABLED — At this point, every memory address the CPU uses is
+;     a real physical address. There's no virtual memory yet. This simplifies
+;     things early on — what we write is literally what lands in RAM.
+;
+;   Interrupts DISABLED — The CPU won't respond to keyboard, timer, or any
+;     other hardware signals yet. We have to set up our own interrupt table
+;     (IDT) before we dare turn interrupts on.
+;
+;   EAX = 0x2BADB002 — A magic number left by the bootloader confirming it
+;     was multiboot-compliant. We check this in kernel_main.
+;
+;   EBX = multiboot info address — A pointer to a struct describing the
+;     machine: how much RAM it has, what disk was booted from, etc.
+;
+;   NO STACK EXISTS — This is critical. C functions absolutely need a stack
+;     to work: local variables live there, return addresses are pushed there.
+;     Without one, the first function call would scribble over random memory.
+;     Our first job in _start is to carve out a stack and point ESP at it.
 ;
 
 bits 32         ; Tell NASM we're writing 32-bit instructions
@@ -27,16 +56,20 @@ bits 32         ; Tell NASM we're writing 32-bit instructions
 ; =============================================================================
 ; Multiboot Header
 ; =============================================================================
-; The bootloader finds our OS by scanning the first 8 KiB of the binary for
-; this exact sequence of bytes. The linker script puts this section first.
 ;
-; The header is three 4-byte (32-bit) values placed back to back:
+; ANALOGY: This header is like the barcode on a retail product. When a store
+; scanner sees it, it immediately knows what the product is. When the bootloader
+; scans our binary, it's looking for this exact byte pattern — if found within
+; the first 8 KiB, it recognizes our file as a valid OS kernel and boots it.
 ;
-;   [magic]    0x1BADB002  — the "knock knock, I'm an OS" signature
-;   [flags]    0x00000003  — requests: (bit 0) align modules to 4K pages,
-;                                       (bit 1) give us a memory map
-;   [checksum] ???         — must make (magic + flags + checksum) == 0
-;                            This is just a sanity check for the bootloader
+; The Multiboot spec defines exactly three consecutive 32-bit values:
+;
+;   [magic]    0x1BADB002  — "I'm a multiboot-compatible OS kernel"
+;   [flags]    0x00000003  — requests to the bootloader:
+;                              bit 0: align any loaded modules to 4 KB boundaries
+;                              bit 1: pass us a memory map (how much RAM exists)
+;   [checksum]             — must make (magic + flags + checksum) equal zero,
+;                            so the bootloader can verify the header isn't corrupted
 ;
 section .multiboot
 align 4
@@ -52,19 +85,28 @@ dd MULTIBOOT_CHECKSUM
 ; =============================================================================
 ; Stack
 ; =============================================================================
-; x86 C code needs a stack. Local variables, function arguments, and return
-; addresses all live on the stack. Without one, the very first C function call
-; would corrupt random memory.
 ;
-; We carve out 16 KiB in the .bss section (uninitialized data). The bootloader
-; zeroes .bss for us before jumping to _start. The stack grows DOWNWARD, so
-; we'll set ESP to stack_top (the highest address).
+; WHAT IS THE STACK? Every function call in C needs scratch space: somewhere
+; to store local variables, track where to return when the function is done,
+; and pass arguments to other functions. That scratch space is the stack.
 ;
-;   stack_bottom  [lower address]
-;   |             <-- stack grows downward
-;   |             <-- each PUSH decrements ESP then writes
-;   |             <-- each POP reads then increments ESP
-;   stack_top     [higher address]  <-- ESP starts here
+; ANALOGY: Imagine a physical stack of sticky notes. Every time you call a
+; function, you add a note on top ("return to line 42, local var x=5...").
+; When the function returns, you tear off the top note and go back to where
+; it says. Without any paper, you can't keep track of anything.
+;
+; ESP (Extended Stack Pointer) is the CPU register that tracks where the top
+; of the stack currently is. It's just a number — a memory address. When you
+; PUSH something, the CPU subtracts 4 from ESP and writes there. When you POP,
+; it reads from ESP and adds 4 back.
+;
+; The stack grows DOWNWARD in memory (toward lower addresses). So we reserve
+; a 16 KiB block, and set ESP to stack_top (the HIGH end). The first push
+; lands at stack_top-4, the next at stack_top-8, and so on downward.
+;
+;   stack_bottom  [lower address]  — the floor; overflowing past here = crash
+;   |             ...              — stack grows downward into this space
+;   stack_top     [higher address] — ESP starts here, moves down with each PUSH
 ;
 section .bss
 align 16                ; 16-byte alignment (required for SSE instructions)
@@ -92,15 +134,20 @@ _start:
     ; ------------------------------------------------------------------
     ; 2. Pass multiboot info to kernel_main as C function arguments
     ; ------------------------------------------------------------------
-    ; Our kernel_main C signature will be:
+    ; Our kernel_main C signature is:
     ;   void kernel_main(uint32_t magic, uint32_t mboot_addr)
     ;
-    ; The C calling convention (cdecl) passes arguments on the stack,
-    ; pushed right-to-left (last argument first). So we push EBX (the
-    ; multiboot info address = 2nd arg) first, then EAX (magic = 1st arg).
+    ; In the cdecl calling convention (what our C compiler uses), function
+    ; arguments are passed by pushing them onto the stack in REVERSE order
+    ; (last argument first), then calling the function. The called function
+    ; knows to read its first argument at [esp+4], second at [esp+8], etc.
     ;
-    ; When kernel_main does:  uint32_t magic = first_arg;
-    ; the compiler reads it from [esp+4] — which is where EAX landed.
+    ; At this point:
+    ;   EAX = 0x2BADB002       (magic, set by the bootloader)
+    ;   EBX = multiboot info   (pointer to boot info struct, set by bootloader)
+    ;
+    ; EAX and EBX are general-purpose CPU registers — buckets that hold
+    ; 32-bit values. The bootloader left our two values there by convention.
     ;
     push ebx            ; 2nd argument: multiboot info struct address
     push eax            ; 1st argument: magic number (should be 0x2BADB002)

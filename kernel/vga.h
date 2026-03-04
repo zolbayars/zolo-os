@@ -5,18 +5,34 @@
  * vga.h — VGA Text Mode Driver
  * =============================================================================
  *
- * VGA text mode gives us an 80x25 character grid. Each cell in the grid is
- * a 16-bit value stored at physical address 0xB8000:
+ * WHAT IS VGA TEXT MODE?
  *
- *   Bits  0–7:  ASCII character code
- *   Bits  8–11: Foreground color (0–15)
- *   Bits 12–14: Background color (0–7, bit 15 enables blinking if set)
+ * VGA (Video Graphics Array) text mode is the simplest way to put characters
+ * on screen in an x86 system. No GPU drivers, no framebuffers, no fonts to
+ * render — just a block of memory that the display hardware reads and shows.
  *
- * To print the letter 'A' in white on black at row 0, column 0:
+ * ANALOGY: Think of it as a shared whiteboard between the CPU and the monitor.
+ * The CPU writes characters into specific cells, and the monitor continuously
+ * reads that memory and draws whatever it finds there. Write an 'A' to cell 0,
+ * and the letter A appears in the top-left corner of the screen — instantly.
+ *
+ * HOW IT WORKS
+ *
+ * The VGA controller maps a fixed region of physical memory — starting at
+ * address 0xB8000 — directly to the screen. The screen is an 80x25 grid of
+ * character cells (80 columns, 25 rows). Each cell is 2 bytes (16 bits):
+ *
+ *   Byte 0 (bits 0–7):  The ASCII character to display (e.g. 0x41 = 'A')
+ *   Byte 1 (bits 8–15): The color attribute:
+ *                          bits 8–11:  foreground color (0–15)
+ *                          bits 12–14: background color (0–7)
+ *                          bit  15:    blink enable (we leave this off)
+ *
+ * Example — print 'A' in white on black at the top-left corner:
  *   uint16_t* vga = (uint16_t*)0xB8000;
- *   vga[0] = 'A' | (0x0F << 8);   // 0x0F = white fg, black bg
+ *   vga[0] = 'A' | (0x0F << 8);   // 0x0F = white foreground, black background
  *
- * That's it — no syscalls, no GPU, just a memory write.
+ * That's it. No system calls. No drivers to load. Just a memory write.
  */
 
 #include "types.h"

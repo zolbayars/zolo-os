@@ -6,28 +6,44 @@
  * kprintf.c — Formatted kernel printf implementation
  * =============================================================================
  *
- * Design notes:
+ * HOW VARIADIC ARGUMENTS WORK
  *
- * Variadic arguments — the __builtin_va_* family:
- *   In a hosted environment you'd use <stdarg.h>. In freestanding mode, clang
- *   exposes the same mechanism as built-in compiler intrinsics:
- *     __builtin_va_list   — opaque type that tracks the argument position
- *     __builtin_va_start  — initializes the list, points it past the last
- *                           named parameter
- *     __builtin_va_arg    — reads the next argument with the given type and
- *                           advances the position
- *     __builtin_va_end    — clean-up (required by the ABI on some platforms)
+ * When you call kprintf("x=%d y=%d", 10, 20), the compiler pushes 10 and 20
+ * onto the stack after the format string. The __builtin_va_* family gives us
+ * a way to walk through those extra arguments one by one at runtime:
  *
- * Integer formatting — print_uint:
- *   Converting an integer to decimal or hex is done by extracting digits from
- *   the least-significant end (val % base) and storing them in a small buffer,
- *   then printing the buffer in reverse. The buffer needs at most 10 chars for
- *   base-10 (max uint32 = 4,294,967,295) or 8 chars for base-16.
+ *   __builtin_va_list   — a "cursor" that tracks which argument we're up to
+ *   __builtin_va_start  — places the cursor just after the last named argument
+ *   __builtin_va_arg    — reads the next argument (you tell it the type) and
+ *                         advances the cursor
+ *   __builtin_va_end    — marks the cursor as done (required for correctness
+ *                         on some CPU architectures where cleanup is needed)
  *
- * Signed integers (%d):
- *   We print a '-' sign and then convert to unsigned using two's complement
- *   arithmetic: `(uint32_t)0 - (uint32_t)val`. This handles INT_MIN correctly
- *   because it stays in well-defined unsigned arithmetic — no signed overflow.
+ * ANALOGY: Think of the extra arguments as a row of numbered envelopes.
+ * va_start hands you an envelope opener pointing at envelope #1. va_arg
+ * opens the current envelope, reads it, and moves to the next one.
+ *
+ * HOW INTEGER-TO-STRING CONVERSION WORKS (print_uint)
+ *
+ * You can't print an integer directly — you need to convert it to ASCII digits.
+ * The trick: repeatedly divide by the base (10 for decimal, 16 for hex) and
+ * collect remainders. The remainders come out in reverse order (least significant
+ * digit first), so we store them in a small buffer and print the buffer backward.
+ *
+ * Example: converting 123 to "123"
+ *   123 % 10 = 3  → buf[0]
+ *    12 % 10 = 2  → buf[1]
+ *     1 % 10 = 1  → buf[2]
+ *   Print buf in reverse: "123" ✓
+ *
+ * SIGNED INTEGERS (%d) AND INT_MIN SAFETY
+ *
+ * For negative numbers we print '-' then negate the value. But negating
+ * INT_MIN (-2,147,483,648) in signed arithmetic overflows — there's no +2B
+ * that fits in 32 bits. We avoid this by working in unsigned arithmetic:
+ *   (uint32_t)0 - (uint32_t)val
+ * Unsigned subtraction wraps around by the C standard, giving the correct
+ * absolute value even for INT_MIN.
  */
 
 /* ---------------------------------------------------------------------------

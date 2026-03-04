@@ -5,16 +5,23 @@
  * string.h — Kernel string and memory utilities
  * =============================================================================
  *
- * In a normal program, these come from <string.h> in libc. We don't have
- * libc, so we implement the ones our kernel needs.
+ * WHY WE REIMPLEMENT THESE
  *
- * Why do we need memset and memcpy even if we don't call them directly?
- * Clang emits calls to these functions automatically for:
- *   - Initializing a struct:       my_struct s = {0};  → calls memset
- *   - Copying a struct:            s1 = s2;            → calls memcpy
- *   - Initializing a char array:   char buf[64] = {};  → calls memset
+ * Any C developer knows memset, memcpy, and strcmp — they're in <string.h>.
+ * But that <string.h> is part of libc, which runs on top of an OS. Since we
+ * ARE the OS, there's no libc available. We have to provide these ourselves.
  *
- * If we don't provide them, the linker will fail with "undefined symbol".
+ * ANALOGY: It's like building the first road in a new city. You can't use a
+ * delivery truck to bring construction materials — because trucks need roads
+ * to drive on. You have to build the road by hand first, then the trucks can
+ * come. memset and memcpy are our "first roads."
+ *
+ * WHY THE COMPILER NEEDS THEM EVEN IF WE DON'T CALL THEM EXPLICITLY
+ *
+ * Clang is smart: when you write `struct Foo f = {0}`, it doesn't emit a
+ * loop — it calls memset under the hood (faster on real hardware). Same for
+ * struct copies. If we don't provide these functions, the linker fails with
+ * "undefined symbol: memset" even though we never wrote memset() in our code.
  */
 
 #include "types.h"

@@ -5,24 +5,40 @@
  * io.h — x86 Port I/O
  * =============================================================================
  *
- * On x86, hardware devices are controlled through two mechanisms:
+ * HOW THE CPU TALKS TO HARDWARE
  *
- *   1. Memory-mapped I/O (MMIO): The device exposes registers as memory
- *      addresses. You read/write them with normal mov instructions.
- *      Example: VGA video memory at 0xB8000.
+ * When your app calls printf(), eventually some code down the stack has to
+ * physically send bytes to the screen, keyboard, or disk. How? There are two
+ * ways a CPU can communicate with hardware devices:
  *
- *   2. Port I/O: The device has a separate 16-bit "I/O address space"
- *      (distinct from RAM). You access it with special `in` and `out`
- *      CPU instructions. Example: keyboard controller at port 0x60.
+ *   1. Memory-Mapped I/O (MMIO):
+ *      The device "pretends" to be a region of RAM at a fixed address.
+ *      Writing to that address doesn't go to RAM — it goes to the device.
+ *      Example: the VGA text buffer lives at physical address 0xB8000.
+ *      We write a character there with a normal memory write, and it appears
+ *      on screen. No special instruction needed.
  *
- * This file provides outb() and inb() — the fundamental primitives for
- * port I/O. Nearly every piece of hardware we'll talk to uses them:
+ *   2. Port I/O:
+ *      The x86 CPU has a completely separate 16-bit address space just for
+ *      hardware devices, distinct from RAM. You can't reach it with normal
+ *      memory reads/writes — you need special `in` and `out` CPU instructions.
  *
- *   Port 0x60        PS/2 keyboard data
- *   Port 0x20/0xA0   PIC (interrupt controller)
- *   Port 0x40-0x43   PIT (timer)
- *   Port 0x3D4/0x3D5 VGA cursor position
- *   Port 0x64        PS/2 controller command/status
+ *      ANALOGY: think of RAM as the city's street addresses, and ports as a
+ *      private internal phone extension system in a building. Same building,
+ *      but a completely different numbering scheme accessible only with the
+ *      right "phone" (the in/out instructions).
+ *
+ * Every hardware device that uses port I/O has a fixed port number assigned
+ * to it by the PC hardware standard:
+ *
+ *   Port 0x60        PS/2 keyboard — read the last key pressed
+ *   Port 0x20/0xA0   PIC (Programmable Interrupt Controller) — controls which
+ *                    hardware events trigger CPU interrupts
+ *   Port 0x40–0x43   PIT (Programmable Interval Timer) — the system clock tick
+ *   Port 0x3D4/0x3D5 VGA cursor — move the blinking cursor on screen
+ *   Port 0x64        PS/2 controller status and commands
+ *
+ * outb() and inb() are the two primitives that cover everything above.
  */
 
 #include "types.h"

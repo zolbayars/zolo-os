@@ -5,10 +5,20 @@
  * vga.c — VGA Text Mode Driver Implementation
  * =============================================================================
  *
- * State we track:
- *   - cursor_row / cursor_col: where the next character will be written
- *   - current_color: the attribute byte applied to every character we write
- *   - vga_buffer: pointer to the VGA memory at 0xB8000
+ * This file implements the VGA text driver declared in vga.h. All the actual
+ * work happens through three pieces of state that we maintain:
+ *
+ *   cursor_row / cursor_col — Where the next character will be written.
+ *     Think of this as the blinking cursor position on a terminal.
+ *
+ *   current_color — The attribute byte (foreground + background color) that
+ *     will be applied to every character we write until changed. Like having
+ *     a marker of a specific color in your hand — everything you write uses
+ *     that color until you pick up a different one.
+ *
+ *   vga_buffer — A pointer directly to physical address 0xB8000, the start
+ *     of the VGA text memory. Writing to this pointer writes to the screen.
+ *     No function calls, no OS, just a direct memory write.
  */
 
 /* Current cursor position */
@@ -51,16 +61,20 @@ static inline uint8_t make_color(vga_color_t fg, vga_color_t bg) {
 /* ---------------------------------------------------------------------------
  * vga_update_cursor — Move the hardware blinking cursor to (row, col)
  *
- * The VGA cursor position is controlled through two I/O port registers:
- *   Port 0x3D4: index register (tells the VGA chip which register to access)
- *   Port 0x3D5: data register (reads/writes the selected register)
+ * There are two cursors in play here: our software cursor (cursor_row and
+ * cursor_col, tracked in this file) and the hardware blinking underscore
+ * cursor the user actually sees on screen. They should always match.
  *
- * Register 0x0F: cursor location low byte  (bits 0-7 of linear position)
- * Register 0x0E: cursor location high byte (bits 8-15 of linear position)
+ * The VGA hardware exposes its internal registers through two I/O ports:
+ *   Port 0x3D4: the "index" port — you write WHICH register you want to set
+ *   Port 0x3D5: the "data" port  — you then write the VALUE for that register
  *
- * Linear position = row * VGA_COLS + col
+ * This is like a rotary dial on old equipment: first turn the dial to select
+ * the setting you want, then adjust the knob to set the value.
  *
- * We use outb() from io.h to write to these ports.
+ * The cursor position is stored as a single "linear" index (treating the
+ * 80x25 grid as a flat array): position = row * 80 + col. It's 16 bits wide
+ * so it needs two 8-bit registers: one for the high byte, one for the low.
  * --------------------------------------------------------------------------- */
 static void vga_update_cursor(void) {
     uint16_t pos = (uint16_t)(cursor_row * VGA_COLS + cursor_col);

@@ -6,19 +6,38 @@
  * kernel.c — Kernel Entry Point
  * =============================================================================
  *
- * kernel_main is called from boot.asm after the stack is set up.
- * It receives two arguments the bootloader left in registers:
+ * WHAT IS kernel_main?
  *
- *   magic      — should be 0x2BADB002, confirms we were loaded by a
- *                multiboot-compliant bootloader (QEMU's or GRUB)
+ * Every C program has a main() function — the entry point the OS calls after
+ * setting up the process. kernel_main is the same idea, but one level lower:
+ * it's the entry point the BOOTLOADER calls after setting up the CPU. There
+ * is no OS above us. We are the OS.
  *
- *   mboot_addr — physical address of the multiboot info structure,
- *                which contains the memory map, boot device info, etc.
- *                Used later when setting up memory management.
+ * It's called from boot.asm, right after the stack is set up. Two arguments
+ * are passed in that the bootloader left in CPU registers:
  *
- * Initialization order matters: each subsystem may depend on the ones
- * before it. VGA has no dependencies so it goes first — we want to be
- * able to print status messages as early as possible.
+ *   magic      — a specific number (0x2BADB002) that confirms the bootloader
+ *                followed the Multiboot standard. If this is wrong, we know
+ *                something went wrong before we even started.
+ *
+ *   mboot_addr — the physical memory address of a struct the bootloader filled
+ *                in for us, containing info about the machine: how much RAM
+ *                there is, what device we booted from, etc. We'll use this
+ *                later when we add memory management.
+ *
+ * INITIALIZATION ORDER MATTERS
+ *
+ * Each subsystem may depend on the ones before it. We initialize in this order:
+ *   1. VGA first — so we can print status messages for everything that follows
+ *   2. GDT — CPU segment table, required before interrupts
+ *   3. IDT — interrupt table, required before enabling any hardware events
+ *   4. IRQ — remaps the hardware interrupt controller
+ *   5. Timer, Keyboard — register their interrupt handlers
+ *   6. STI — only NOW do we tell the CPU to start accepting interrupts
+ *
+ * Think of it like wiring a house: you run all the cables and install all the
+ * switches before you flip the main breaker. Turning on power before the
+ * wiring is done causes short circuits.
  */
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002

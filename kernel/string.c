@@ -4,9 +4,11 @@
  * string.c — Kernel string and memory utility implementations
  * =============================================================================
  *
- * All implementations are intentionally simple and correct, not optimized.
- * A production kernel (like Linux) uses hand-tuned SIMD assembly for these.
- * For our purposes, byte-by-byte loops are perfectly fine.
+ * All implementations here are intentionally simple: byte-by-byte loops,
+ * easy to read and verify. A production kernel like Linux uses hand-tuned
+ * assembly that processes 16 or 32 bytes at a time using SIMD instructions
+ * (think: special CPU instructions that work like parallel lanes on a highway).
+ * For a learning OS, correctness beats performance every time.
  */
 
 /* ---------------------------------------------------------------------------
@@ -57,13 +59,17 @@ void* memcpy(void* dest, const void* src, size_t n) {
 /* ---------------------------------------------------------------------------
  * memmove — Copy n bytes from src to dest, handles overlapping regions
  *
- * We'll use this in the VGA driver when scrolling: the screen buffer is
- * moved up by one row, which means src and dest overlap (row 1 → row 0,
- * row 2 → row 1, etc.). memcpy would corrupt data in that case.
+ * ANALOGY: Imagine sliding books along a shelf to close a gap. If you move
+ * each book left one slot, you must start from the LEFT side — otherwise
+ * you'd overwrite books you haven't moved yet. If you move them RIGHT, you
+ * start from the RIGHT. memmove figures out which direction is safe.
  *
- * How it handles overlap:
- *   - If dest < src: copy forward (same as memcpy, safe)
- *   - If dest > src: copy backward (prevents overwriting src before reading it)
+ * We use this in the VGA driver when scrolling the screen: the entire buffer
+ * shifts up by one row (row 1 → row 0, row 2 → row 1, ...). Because source
+ * and destination overlap, memcpy would corrupt data mid-copy.
+ *
+ *   - dest < src: copy forward (left-to-right, safe — we read before we overwrite)
+ *   - dest > src: copy backward (right-to-left, safe — same reason, other direction)
  * --------------------------------------------------------------------------- */
 void* memmove(void* dest, const void* src, size_t n) {
     uint8_t*       d = (uint8_t*)dest;
