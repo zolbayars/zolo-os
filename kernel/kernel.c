@@ -1,4 +1,5 @@
 #include "vga.h"
+#include "kprintf.h"
 #include "types.h"
 
 /* =============================================================================
@@ -99,6 +100,12 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
      * ----------------------------------------------------------------------- */
     vga_set_color(VGA_YELLOW, VGA_BLACK);
     vga_print("ZoloOS is up.\n");
+
+    /* -----------------------------------------------------------------------
+     * kprintf smoke test
+     * ----------------------------------------------------------------------- */
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    kprintf("\nkprintf: str=%s dec=%d hex=%x char=%c\n", "hello", -42, 0xCAFE, '!');
 
 halt:
     /* Halt the CPU. Interrupts are not yet enabled so nothing will wake us. */
