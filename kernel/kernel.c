@@ -4,6 +4,8 @@
 #include "gdt.h"
 #include "idt.h"
 #include "irq.h"
+#include "timer.h"
+#include "keyboard.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -117,6 +119,18 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     vga_set_color(VGA_WHITE, VGA_BLACK);
     vga_print("PIC remapped (IRQs 0-15 -> INT 32-47)\n");
 
+    timer_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    kprintf("PIT timer running at %d Hz\n", TIMER_HZ);
+
+    keyboard_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    vga_print("PS/2 keyboard ready\n");
+
     /* -----------------------------------------------------------------------
      * Test VGA color output
      * ----------------------------------------------------------------------- */
@@ -142,17 +156,29 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
      * Ready
      * ----------------------------------------------------------------------- */
     vga_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_print("ZoloOS is up.\n");
+    vga_print("ZoloOS is up.\n\n");
 
     /* -----------------------------------------------------------------------
-     * kprintf smoke test
+     * Enable interrupts — the CPU starts responding to hardware events here.
+     * Everything above (GDT, IDT, IRQ, timer, keyboard) must be fully set up
+     * before this line. Turning on interrupts before the IDT is ready = triple fault.
      * ----------------------------------------------------------------------- */
+    __asm__ __volatile__ ("sti");
+
     vga_set_color(VGA_WHITE, VGA_BLACK);
-    kprintf("\nkprintf: str=%s dec=%d hex=%x char=%c\n", "hello", -42, 0xCAFE, '!');
+    vga_print("Type something (Escape to stop):\n");
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+
+    /* Echo keypresses to screen until Escape is pressed */
+    char c;
+    while ((c = keyboard_getchar()) != 0x1B) {  /* 0x1B = Escape */
+        vga_putchar(c);
+    }
+
+    vga_set_color(VGA_DARK_GREY, VGA_BLACK);
+    vga_print("\n[Escape pressed — halting]\n");
 
 halt:
-    /* Halt the CPU. Interrupts are not yet enabled so nothing will wake us. */
-    __asm__ __volatile__ ("cli");
     for (;;) {
         __asm__ __volatile__ ("hlt");
     }
