@@ -73,9 +73,11 @@ BUILD_DIR = build
 ASM_SRCS = $(wildcard boot/*.asm)
 C_SRCS   = $(wildcard kernel/*.c)
 
-# Convert source paths to object file paths in build/
-ASM_OBJS = $(patsubst boot/%.asm,$(BUILD_DIR)/%.o,$(ASM_SRCS))
-C_OBJS   = $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(C_SRCS))
+# ASM objects go in build/boot/, C objects go in build/kernel/.
+# This avoids name collisions (e.g. boot/gdt.asm and kernel/gdt.c both
+# want to produce gdt.o — separate dirs keep them distinct).
+ASM_OBJS = $(patsubst boot/%.asm,$(BUILD_DIR)/boot/%.o,$(ASM_SRCS))
+C_OBJS   = $(patsubst kernel/%.c,$(BUILD_DIR)/kernel/%.o,$(C_SRCS))
 ALL_OBJS = $(ASM_OBJS) $(C_OBJS)
 
 # The final kernel binary
@@ -92,17 +94,20 @@ all: $(KERNEL)
 $(KERNEL): $(ALL_OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
 
-# Compile assembly files
-$(BUILD_DIR)/%.o: boot/%.asm | $(BUILD_DIR)
+# Compile assembly files into build/boot/
+$(BUILD_DIR)/boot/%.o: boot/%.asm | $(BUILD_DIR)/boot
 	$(ASM) $(ASFLAGS) $< -o $@
 
-# Compile C files
-$(BUILD_DIR)/%.o: kernel/%.c | $(BUILD_DIR)
+# Compile C files into build/kernel/
+$(BUILD_DIR)/kernel/%.o: kernel/%.c | $(BUILD_DIR)/kernel
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Create build directory if it doesn't exist
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+# Create build subdirectories if they don't exist
+$(BUILD_DIR)/boot:
+	mkdir -p $(BUILD_DIR)/boot
+
+$(BUILD_DIR)/kernel:
+	mkdir -p $(BUILD_DIR)/kernel
 
 # Run in QEMU
 # -kernel: Boot an ELF binary directly (QEMU has built-in multiboot support)

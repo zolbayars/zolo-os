@@ -1,6 +1,9 @@
 #include "vga.h"
 #include "kprintf.h"
 #include "types.h"
+#include "gdt.h"
+#include "idt.h"
+#include "irq.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -92,6 +95,27 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     vga_print("[OK] ");
     vga_set_color(VGA_WHITE, VGA_BLACK);
     vga_print("Kernel loaded at 0x100000 (1 MiB)\n");
+
+    /* -----------------------------------------------------------------------
+     * CPU descriptor tables and interrupt infrastructure
+     * ----------------------------------------------------------------------- */
+    gdt_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    vga_print("GDT installed (null, kernel code, kernel data)\n");
+
+    idt_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    vga_print("IDT installed (32 exceptions + 16 IRQ slots)\n");
+
+    irq_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    vga_print("PIC remapped (IRQs 0-15 -> INT 32-47)\n");
 
     /* -----------------------------------------------------------------------
      * Test VGA color output
