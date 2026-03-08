@@ -1,6 +1,7 @@
 #include "timer.h"
 #include "irq.h"
 #include "io.h"
+#include "task.h"
 
 /* =============================================================================
  * timer.c — PIT driver implementation
@@ -46,8 +47,13 @@ static volatile uint32_t tick_count = 0;
  * timer_callback — called by irq_handler on every IRQ0 (timer tick)
  * --------------------------------------------------------------------------- */
 static void timer_callback(interrupt_frame_t* frame) {
-    (void)frame;  /* unused for now — will be used by scheduler later */
+    (void)frame;
     tick_count++;
+
+    /* Let the scheduler check if it's time to switch tasks.
+     * This is what makes multitasking preemptive — tasks get interrupted
+     * even if they didn't voluntarily yield. */
+    task_schedule();
 }
 
 /* ---------------------------------------------------------------------------

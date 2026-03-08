@@ -9,6 +9,7 @@
 #include "pmm.h"
 #include "paging.h"
 #include "heap.h"
+#include "task.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -44,7 +45,8 @@
  *   6. PMM — discover and track physical memory frames
  *   7. Paging — enable virtual memory with identity mapping
  *   8. Heap — bump allocator for dynamic kernel allocations
- *   9. STI — only NOW do we tell the CPU to start accepting interrupts
+ *   9. Tasks — register kernel_main as task 0, enable scheduler
+ *  10. STI — only NOW do we tell the CPU to start accepting interrupts
  *
  * Think of it like wiring a house: you run all the cables and install all the
  * switches before you flip the main breaker. Turning on power before the
@@ -164,6 +166,15 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     vga_set_color(VGA_WHITE, VGA_BLACK);
     kprintf("Kernel heap ready (%u KiB at 0x%x)\n",
             heap_get_size() / 1024, heap_start);
+
+    /* -----------------------------------------------------------------------
+     * Multitasking — register kernel_main as task 0, enable scheduler
+     * ----------------------------------------------------------------------- */
+    task_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    kprintf("Multitasking ready (%u task slots)\n", MAX_TASKS);
 
     /* -----------------------------------------------------------------------
      * Test VGA color output
