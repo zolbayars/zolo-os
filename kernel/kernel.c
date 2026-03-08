@@ -10,6 +10,7 @@
 #include "paging.h"
 #include "heap.h"
 #include "task.h"
+#include "shell.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -46,7 +47,7 @@
  *   7. Paging — enable virtual memory with identity mapping
  *   8. Heap — bump allocator for dynamic kernel allocations
  *   9. Tasks — register kernel_main as task 0, enable scheduler
- *  10. STI — only NOW do we tell the CPU to start accepting interrupts
+ *  10. STI — enable interrupts, launch shell task
  *
  * Think of it like wiring a house: you run all the cables and install all the
  * switches before you flip the main breaker. Turning on power before the
@@ -177,31 +178,11 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     kprintf("Multitasking ready (%u task slots)\n", MAX_TASKS);
 
     /* -----------------------------------------------------------------------
-     * Test VGA color output
+     * Ready — print summary
      * ----------------------------------------------------------------------- */
     vga_print("\n");
-    vga_set_color(VGA_DARK_GREY, VGA_BLACK);
-    vga_print("Color test: ");
-
-    vga_color_t colors[] = {
-        VGA_RED, VGA_LIGHT_RED, VGA_YELLOW, VGA_LIGHT_GREEN,
-        VGA_LIGHT_CYAN, VGA_LIGHT_BLUE, VGA_LIGHT_MAGENTA, VGA_WHITE
-    };
-    const char* labels[] = {
-        "RED ", "LRED ", "YEL ", "LGRN ",
-        "LCYN ", "LBLU ", "LMAG ", "WHT "
-    };
-    for (int i = 0; i < 8; i++) {
-        vga_set_color(colors[i], VGA_BLACK);
-        vga_print(labels[i]);
-    }
-    vga_print("\n\n");
-
-    /* -----------------------------------------------------------------------
-     * Ready
-     * ----------------------------------------------------------------------- */
     vga_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_print("ZoloOS is up.\n\n");
+    vga_print("ZoloOS is up.\n");
 
     /* -----------------------------------------------------------------------
      * Enable interrupts — the CPU starts responding to hardware events here.
@@ -210,19 +191,21 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
      * ----------------------------------------------------------------------- */
     __asm__ __volatile__ ("sti");
 
-    vga_set_color(VGA_WHITE, VGA_BLACK);
-    vga_print("Type something (Escape to stop):\n");
-    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    /* -----------------------------------------------------------------------
+     * Launch the shell as a separate task
+     * ----------------------------------------------------------------------- */
+    task_create("shell", shell_run);
 
-    /* Echo keypresses to screen until Escape is pressed */
-    char c;
-    while ((c = keyboard_getchar()) != 0x1B) {  /* 0x1B = Escape */
-        vga_putchar(c);
-    }
-
-    vga_set_color(VGA_DARK_GREY, VGA_BLACK);
-    vga_print("\n[Escape pressed — halting]\n");
-
+    /* -----------------------------------------------------------------------
+     * kernel_main becomes the idle task — it just halts between interrupts.
+     * The scheduler switches to the shell (or other tasks) whenever they're
+     * ready to run. When no tasks need the CPU, we end up back here, and
+     * hlt saves power by putting the CPU to sleep until the next interrupt.
+     *
+     * ANALOGY: The idle task is like a night security guard who sits quietly
+     * until something needs attention. When a timer tick or keyboard IRQ
+     * fires, the guard wakes up, and the scheduler decides what to do.
+     * ----------------------------------------------------------------------- */
 halt:
     for (;;) {
         __asm__ __volatile__ ("hlt");
