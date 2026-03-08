@@ -50,7 +50,11 @@ SECTIONS {
         *(.bss)
     }
 
+    /* Align to 4 KiB boundary so the PMM bitmap starts page-aligned.
+     * This avoids wasting partial frames and keeps things tidy. */
+    . = ALIGN(4K);
+
     /* This symbol lets our C code know where the kernel ends in memory.
-     * Used later by the physical memory manager to find free RAM. */
+     * The physical memory manager places its bitmap here. */
     _kernel_end = .;
 }

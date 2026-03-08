@@ -6,6 +6,7 @@
 #include "irq.h"
 #include "timer.h"
 #include "keyboard.h"
+#include "pmm.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -38,7 +39,8 @@
  *   3. IDT — interrupt table, required before enabling any hardware events
  *   4. IRQ — remaps the hardware interrupt controller
  *   5. Timer, Keyboard — register their interrupt handlers
- *   6. STI — only NOW do we tell the CPU to start accepting interrupts
+ *   6. PMM — discover and track physical memory frames
+ *   7. STI — only NOW do we tell the CPU to start accepting interrupts
  *
  * Think of it like wiring a house: you run all the cables and install all the
  * switches before you flip the main breaker. Turning on power before the
@@ -48,9 +50,6 @@
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
 void kernel_main(uint32_t magic, uint32_t mboot_addr) {
-    /* Suppress unused warning — mboot_addr will be used for memory management */
-    (void)mboot_addr;
-
     /* -----------------------------------------------------------------------
      * Initialize display first so we can print status messages immediately
      * ----------------------------------------------------------------------- */
@@ -130,6 +129,17 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     vga_print("[OK] ");
     vga_set_color(VGA_WHITE, VGA_BLACK);
     vga_print("PS/2 keyboard ready\n");
+
+    /* -----------------------------------------------------------------------
+     * Physical memory manager — discover RAM and build the frame bitmap
+     * ----------------------------------------------------------------------- */
+    pmm_init(mboot_addr);
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    kprintf("Physical memory: %u frames free (%u MiB usable)\n",
+            pmm_get_free_count(),
+            (uint32_t)((uint64_t)pmm_get_free_count() * FRAME_SIZE / 1024 / 1024));
 
     /* -----------------------------------------------------------------------
      * Test VGA color output
