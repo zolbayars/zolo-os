@@ -8,6 +8,7 @@
 #include "keyboard.h"
 #include "pmm.h"
 #include "paging.h"
+#include "heap.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -42,7 +43,8 @@
  *   5. Timer, Keyboard — register their interrupt handlers
  *   6. PMM — discover and track physical memory frames
  *   7. Paging — enable virtual memory with identity mapping
- *   8. STI — only NOW do we tell the CPU to start accepting interrupts
+ *   8. Heap — bump allocator for dynamic kernel allocations
+ *   9. STI — only NOW do we tell the CPU to start accepting interrupts
  *
  * Think of it like wiring a house: you run all the cables and install all the
  * switches before you flip the main breaker. Turning on power before the
@@ -151,6 +153,17 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     vga_print("[OK] ");
     vga_set_color(VGA_WHITE, VGA_BLACK);
     vga_print("Paging enabled (identity-mapped 0-16 MiB)\n");
+
+    /* -----------------------------------------------------------------------
+     * Kernel heap — dynamic memory allocation (bump allocator)
+     * ----------------------------------------------------------------------- */
+    uint32_t heap_start = (pmm_get_bitmap_end() + 0xFFF) & ~((uint32_t)0xFFF);
+    heap_init(heap_start, 64 * 1024);  /* 64 KiB heap — plenty for early bringup */
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    kprintf("Kernel heap ready (%u KiB at 0x%x)\n",
+            heap_get_size() / 1024, heap_start);
 
     /* -----------------------------------------------------------------------
      * Test VGA color output
