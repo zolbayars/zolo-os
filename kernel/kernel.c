@@ -7,6 +7,7 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "pmm.h"
+#include "paging.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -40,7 +41,8 @@
  *   4. IRQ — remaps the hardware interrupt controller
  *   5. Timer, Keyboard — register their interrupt handlers
  *   6. PMM — discover and track physical memory frames
- *   7. STI — only NOW do we tell the CPU to start accepting interrupts
+ *   7. Paging — enable virtual memory with identity mapping
+ *   8. STI — only NOW do we tell the CPU to start accepting interrupts
  *
  * Think of it like wiring a house: you run all the cables and install all the
  * switches before you flip the main breaker. Turning on power before the
@@ -140,6 +142,15 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     kprintf("Physical memory: %u frames free (%u MiB usable)\n",
             pmm_get_free_count(),
             (uint32_t)((uint64_t)pmm_get_free_count() * FRAME_SIZE / 1024 / 1024));
+
+    /* -----------------------------------------------------------------------
+     * Paging — set up virtual memory with identity mapping
+     * ----------------------------------------------------------------------- */
+    paging_init();
+    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    vga_print("[OK] ");
+    vga_set_color(VGA_WHITE, VGA_BLACK);
+    vga_print("Paging enabled (identity-mapped 0-16 MiB)\n");
 
     /* -----------------------------------------------------------------------
      * Test VGA color output
