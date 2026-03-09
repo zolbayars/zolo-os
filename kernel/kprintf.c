@@ -44,7 +44,18 @@
  *   (uint32_t)0 - (uint32_t)val
  * Unsigned subtraction wraps around by the C standard, giving the correct
  * absolute value even for INT_MIN.
+ *
+ * OUTPUT REDIRECTION
+ *
+ * By default, kprintf sends characters to vga_putchar (VGA text mode). When
+ * the GUI is active, kernel.c calls kprintf_set_putchar() to redirect output
+ * through the window manager instead. This way all existing kprintf calls
+ * (in shell.c, pmm.c, etc.) automatically write to graphical windows without
+ * any code changes.
  */
+
+/* Function pointer for character output — defaults to VGA, switchable to FB */
+static void (*put_fn)(char) = 0;
 
 /* ---------------------------------------------------------------------------
  * uint_to_str — convert an unsigned integer to a string in the given base.
@@ -77,13 +88,22 @@ static int uint_to_str(uint32_t val, uint32_t base, char* buf, int buf_size) {
  * pad_and_print — print a string with optional width and alignment.
  * If width > len, pads with pad_char. If left_align, padding goes on the right.
  * --------------------------------------------------------------------------- */
+/* Helper: emit one character through the active output backend */
+static void emit(char c) {
+    if (put_fn) {
+        put_fn(c);
+    } else {
+        vga_putchar(c);
+    }
+}
+
 static void pad_and_print(const char* s, int len, int width, bool left_align, char pad_char) {
     if (!left_align) {
-        for (int i = len; i < width; i++) vga_putchar(pad_char);
+        for (int i = len; i < width; i++) emit(pad_char);
     }
-    for (int i = 0; i < len; i++) vga_putchar(s[i]);
+    for (int i = 0; i < len; i++) emit(s[i]);
     if (left_align) {
-        for (int i = len; i < width; i++) vga_putchar(' ');
+        for (int i = len; i < width; i++) emit(' ');
     }
 }
 
@@ -98,7 +118,7 @@ void kprintf(const char* fmt, ...) {
 
     for (const char* p = fmt; *p != '\0'; p++) {
         if (*p != '%') {
-            vga_putchar(*p);
+            emit(*p);
             continue;
         }
 
@@ -142,7 +162,7 @@ void kprintf(const char* fmt, ...) {
                 char buf[12];
                 int len;
                 if (val < 0) {
-                    vga_putchar('-');
+                    emit('-');
                     len = uint_to_str((uint32_t)0 - (uint32_t)val, 10, buf, sizeof(buf));
                 } else {
                     len = uint_to_str((uint32_t)val, 10, buf, sizeof(buf));
@@ -165,20 +185,27 @@ void kprintf(const char* fmt, ...) {
             }
             case 'c': {
                 char c = (char)__builtin_va_arg(args, int);
-                vga_putchar(c);
+                emit(c);
                 break;
             }
             case '%': {
-                vga_putchar('%');
+                emit('%');
                 break;
             }
             default: {
-                vga_putchar('%');
-                vga_putchar(*p);
+                emit('%');
+                emit(*p);
                 break;
             }
         }
     }
 
     __builtin_va_end(args);
+}
+
+/* ---------------------------------------------------------------------------
+ * kprintf_set_putchar — redirect output to a custom function
+ * --------------------------------------------------------------------------- */
+void kprintf_set_putchar(void (*fn)(char)) {
+    put_fn = fn;
 }

@@ -40,4 +40,9 @@
 
 void kprintf(const char* fmt, ...);
 
+/* Redirect kprintf output to a custom putchar function.
+ * Pass NULL to revert to the default VGA putchar.
+ * Used by the GUI to route kernel output through the window manager. */
+void kprintf_set_putchar(void (*fn)(char));
+
 #endif /* KPRINTF_H */
