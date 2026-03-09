@@ -91,4 +91,16 @@
  * page tables) and before any code that depends on virtual memory. */
 void paging_init(void);
 
+/* Identity-map an additional region of physical memory.
+ * Used to map the VESA framebuffer, which lives at a high physical address
+ * (e.g. 0xFD000000) outside our initial 16 MiB identity map.
+ *
+ * Allocates page tables from the PMM as needed. The region is rounded to
+ * page boundaries.
+ *
+ * @phys_start: start of the physical region (will be page-aligned down)
+ * @size:       size in bytes (will be rounded up to full pages)
+ */
+void paging_identity_map_region(uint32_t phys_start, uint32_t size);
+
 #endif /* PAGING_H */

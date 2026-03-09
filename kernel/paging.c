@@ -131,3 +131,67 @@ void paging_init(void) {
      * for user-space processes. */
     kprintf("Paging: identity-mapped first 16 MiB (%u page tables)\n", 4);
 }
+
+/* ---------------------------------------------------------------------------
+ * paging_identity_map_region — Map a physical region into virtual memory
+ *
+ * This is used after paging is already enabled to add new mappings — for
+ * example, to make the VESA framebuffer (at a high physical address like
+ * 0xFD000000) accessible to the CPU.
+ *
+ * For each page in the region, we:
+ *   1. Check if a page table exists for that address range
+ *   2. If not, allocate one from the PMM and wire it into the page directory
+ *   3. Set the page table entry to map virtual = physical (identity map)
+ *
+ * ANALOGY: Our initial setup built roads for the first 16 MiB of the city.
+ * This function extends the road network to reach a new neighborhood
+ * (the framebuffer) that's far outside the original city limits.
+ * --------------------------------------------------------------------------- */
+void paging_identity_map_region(uint32_t phys_start, uint32_t size) {
+    /* Align start down and end up to page boundaries */
+    uint32_t start = phys_start & ~(PAGE_SIZE - 1);
+    uint32_t end = (phys_start + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+    uint32_t pages_mapped = 0;
+
+    for (uint32_t addr = start; addr < end; addr += PAGE_SIZE) {
+        /* Which page directory entry covers this address?
+         * Top 10 bits of the address = PD index (each PDE covers 4 MiB). */
+        uint32_t pd_index = addr >> 22;
+
+        /* Which page table entry within that table?
+         * Middle 10 bits = PT index (each PTE covers 4 KiB). */
+        uint32_t pt_index = (addr >> 12) & 0x3FF;
+
+        /* If no page table exists for this PD entry, allocate one */
+        if (!(page_directory[pd_index] & PTE_PRESENT)) {
+            uint32_t pt_frame = pmm_alloc_frame();
+            if (!pt_frame) {
+                kprintf("paging: out of frames for page table!\n");
+                return;
+            }
+            /* Zero the new page table (all entries "not present") */
+            memset((void*)pt_frame, 0, PAGE_SIZE);
+            /* Wire it into the page directory */
+            page_directory[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITABLE;
+        }
+
+        /* Get the page table's address (strip the flag bits from the PDE) */
+        uint32_t* pt = (uint32_t*)(page_directory[pd_index] & ~0xFFF);
+
+        /* Set the PTE: identity map (virtual addr = physical addr) */
+        pt[pt_index] = addr | PTE_PRESENT | PTE_WRITABLE;
+        pages_mapped++;
+    }
+
+    /* Flush the TLB by reloading CR3 — tells the CPU to forget any cached
+     * translations that might be stale after we added new mappings.
+     *
+     * ANALOGY: After adding new roads to the map, you tell the GPS to
+     * re-download the map so it knows about the new routes. */
+    __asm__ __volatile__ ("mov %0, %%cr3" : : "r"(page_directory));
+
+    kprintf("Paging: mapped %u pages at 0x%x-0x%x\n",
+            pages_mapped, start, end);
+}
