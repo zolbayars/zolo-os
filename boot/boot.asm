@@ -65,22 +65,42 @@ bits 32         ; Tell NASM we're writing 32-bit instructions
 ; The Multiboot spec defines exactly three consecutive 32-bit values:
 ;
 ;   [magic]    0x1BADB002  — "I'm a multiboot-compatible OS kernel"
-;   [flags]    0x00000003  — requests to the bootloader:
+;   [flags]    0x00000007  — requests to the bootloader:
 ;                              bit 0: align any loaded modules to 4 KB boundaries
 ;                              bit 1: pass us a memory map (how much RAM exists)
+;                              bit 2: pass us video mode info (we want a framebuffer)
 ;   [checksum]             — must make (magic + flags + checksum) equal zero,
 ;                            so the bootloader can verify the header isn't corrupted
+;
+; When bit 2 is set, additional fields after the checksum tell the bootloader
+; what video mode we want. Fields at offsets 12-28 (address hints) must be
+; present but are ignored for ELF kernels — we set them to 0. The video
+; mode fields at offsets 32-44 request a 1024x768 linear framebuffer with
+; 32 bits per pixel (true color: 8 bits each for R, G, B, and unused alpha).
 ;
 section .multiboot
 align 4
 
 MULTIBOOT_MAGIC    equ 0x1BADB002
-MULTIBOOT_FLAGS    equ 0x03
+MULTIBOOT_FLAGS    equ 0x07            ; bits 0+1+2: modules aligned, memory map, video mode
 MULTIBOOT_CHECKSUM equ -(MULTIBOOT_MAGIC + MULTIBOOT_FLAGS)
 
 dd MULTIBOOT_MAGIC      ; dd = "define doubleword" = write a 32-bit value
 dd MULTIBOOT_FLAGS
 dd MULTIBOOT_CHECKSUM
+
+; --- Address fields (offsets 12-28) — unused for ELF, must be present ---
+dd 0                    ; header_addr
+dd 0                    ; load_addr
+dd 0                    ; load_end_addr
+dd 0                    ; bss_end_addr
+dd 0                    ; entry_addr
+
+; --- Video mode request (offsets 32-44) ---
+dd 0                    ; mode_type: 0 = linear graphics framebuffer
+dd 1024                 ; width:  1024 pixels
+dd 768                  ; height: 768 pixels
+dd 32                   ; depth:  32 bits per pixel (ARGB)
 
 ; =============================================================================
 ; Stack

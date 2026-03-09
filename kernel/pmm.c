@@ -1,4 +1,5 @@
 #include "pmm.h"
+#include "multiboot.h"
 #include "string.h"
 #include "kprintf.h"
 
@@ -32,56 +33,6 @@
  * where some blocks are parks (available) and some are government buildings
  * (reserved) — we can only build on the parks.
  */
-
-/* ---------------------------------------------------------------------------
- * Multiboot Info Structures
- *
- * These match the Multiboot specification (v1). The bootloader fills these in
- * and passes us a pointer to the top-level struct in the EBX register.
- *
- * We only need a few fields from the main struct:
- *   - flags:    tells us which fields are valid (bit 6 = memory map present)
- *   - mmap_length / mmap_addr: location and size of the memory map array
- * --------------------------------------------------------------------------- */
-
-/* The main multiboot info structure. We only define fields we actually use.
- * The full struct has many more fields, but C lets us define a partial struct
- * as long as we only access the fields we've defined and they're at the right
- * offsets. We pad with dummy fields to keep offsets correct. */
-typedef struct {
-    uint32_t flags;             /* Offset 0:  which info fields are valid */
-    uint32_t mem_lower;         /* Offset 4:  KiB of low memory (below 1 MiB) */
-    uint32_t mem_upper;         /* Offset 8:  KiB of upper memory (above 1 MiB) */
-    uint32_t boot_device;       /* Offset 12 */
-    uint32_t cmdline;           /* Offset 16 */
-    uint32_t mods_count;        /* Offset 20 */
-    uint32_t mods_addr;         /* Offset 24 */
-    uint32_t syms[4];           /* Offset 28-44: ELF section header info */
-    uint32_t mmap_length;       /* Offset 44: total size of memory map in bytes */
-    uint32_t mmap_addr;         /* Offset 48: physical address of memory map */
-} multiboot_info_t;
-
-/* Each entry in the memory map. The bootloader creates an array of these.
- *
- * IMPORTANT QUIRK: each entry starts with a `size` field that tells you how
- * many bytes follow (NOT including the size field itself). The typical value
- * is 20, meaning the entry is 24 bytes total (4 for size + 20 for the rest).
- * To advance to the next entry: next = (void*)entry + entry->size + 4.
- */
-typedef struct {
-    uint32_t size;              /* Size of this entry (not counting this field) */
-    uint32_t base_addr_low;     /* Low 32 bits of region start address */
-    uint32_t base_addr_high;    /* High 32 bits (always 0 for <4 GiB systems) */
-    uint32_t length_low;        /* Low 32 bits of region length */
-    uint32_t length_high;       /* High 32 bits of length */
-    uint32_t type;              /* 1 = available RAM, anything else = reserved */
-} multiboot_mmap_entry_t;
-
-/* Memory map entry types */
-#define MULTIBOOT_MEMORY_AVAILABLE 1
-
-/* Multiboot flags bit that indicates the memory map is valid */
-#define MULTIBOOT_INFO_MEM_MAP 0x40   /* bit 6 */
 
 /* ---------------------------------------------------------------------------
  * Bitmap state
