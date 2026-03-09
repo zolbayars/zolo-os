@@ -31,4 +31,9 @@
  * This function never returns (it loops reading and executing commands). */
 void shell_run(void);
 
+/* Assign a GUI window for the shell. When set, output goes to the window
+ * instead of VGA text mode. Pass NULL to revert to VGA.
+ * Takes a window_t* (from wm.h), declared as void* to avoid header dependency. */
+void shell_set_window(void* win);
+
 #endif /* SHELL_H */

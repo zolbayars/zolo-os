@@ -11,6 +11,10 @@
 #include "heap.h"
 #include "task.h"
 #include "shell.h"
+#include "fb.h"
+#include "wm.h"
+#include "multiboot.h"
+#include "string.h"
 
 /* =============================================================================
  * kernel.c — Kernel Entry Point
@@ -46,8 +50,9 @@
  *   6. PMM — discover and track physical memory frames
  *   7. Paging — enable virtual memory with identity mapping
  *   8. Heap — bump allocator for dynamic kernel allocations
- *   9. Tasks — register kernel_main as task 0, enable scheduler
- *  10. STI — enable interrupts, launch shell task
+ *   9. Framebuffer — init VESA display and window manager (if available)
+ *  10. Tasks — register kernel_main as task 0, enable scheduler
+ *  11. STI — enable interrupts, launch shell task
  *
  * Think of it like wiring a house: you run all the cables and install all the
  * switches before you flip the main breaker. Turning on power before the
@@ -55,6 +60,131 @@
  */
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+
+/* ---------------------------------------------------------------------------
+ * sysinfo_task — A background task that periodically updates a system info
+ * window with uptime, memory stats, and task list. Like a tiny task manager.
+ * --------------------------------------------------------------------------- */
+static window_t* sysinfo_win = NULL;
+
+static void sysinfo_task(void) {
+    for (;;) {
+        if (!sysinfo_win) {
+            task_yield();
+            continue;
+        }
+
+        wm_clear(sysinfo_win);
+
+        /* Uptime */
+        uint32_t seconds = timer_get_uptime();
+        uint32_t minutes = seconds / 60;
+        uint32_t hours   = minutes / 60;
+
+        wm_print(sysinfo_win, " Uptime: ");
+        /* We can't easily use kprintf here because it's hooked to the shell
+         * window. Instead, build the string manually using wm_print. */
+        char buf[64];
+
+        /* Simple number-to-string for uptime display */
+        /* Format: HH:MM:SS */
+        buf[0] = '0' + (hours / 10) % 10;
+        buf[1] = '0' + hours % 10;
+        buf[2] = ':';
+        buf[3] = '0' + (minutes % 60) / 10;
+        buf[4] = '0' + (minutes % 60) % 10;
+        buf[5] = ':';
+        buf[6] = '0' + (seconds % 60) / 10;
+        buf[7] = '0' + (seconds % 60) % 10;
+        buf[8] = '\n';
+        buf[9] = '\0';
+        wm_print(sysinfo_win, buf);
+
+        /* Memory info */
+        uint32_t free_frames = pmm_get_free_count();
+        uint32_t total_frames = pmm_get_total_count();
+        uint32_t used_frames = total_frames - free_frames;
+
+        wm_print(sysinfo_win, "\n Memory:\n");
+        wm_print(sysinfo_win, "  Total: ");
+        /* Simple decimal printing for frame counts */
+        {
+            uint32_t mib = (uint32_t)((uint64_t)total_frames * FRAME_SIZE / 1024 / 1024);
+            char num[12];
+            int i = 0;
+            if (mib == 0) { num[i++] = '0'; }
+            else {
+                uint32_t tmp = mib;
+                char rev[12];
+                int j = 0;
+                while (tmp > 0) { rev[j++] = '0' + (tmp % 10); tmp /= 10; }
+                while (j > 0) num[i++] = rev[--j];
+            }
+            num[i] = '\0';
+            wm_print(sysinfo_win, num);
+            wm_print(sysinfo_win, " MiB\n");
+        }
+        wm_print(sysinfo_win, "  Used:  ");
+        {
+            uint32_t kib = (uint32_t)((uint64_t)used_frames * FRAME_SIZE / 1024);
+            char num[12];
+            int i = 0;
+            if (kib == 0) { num[i++] = '0'; }
+            else {
+                uint32_t tmp = kib;
+                char rev[12];
+                int j = 0;
+                while (tmp > 0) { rev[j++] = '0' + (tmp % 10); tmp /= 10; }
+                while (j > 0) num[i++] = rev[--j];
+            }
+            num[i] = '\0';
+            wm_print(sysinfo_win, num);
+            wm_print(sysinfo_win, " KiB\n");
+        }
+        wm_print(sysinfo_win, "  Free:  ");
+        {
+            uint32_t mib = (uint32_t)((uint64_t)free_frames * FRAME_SIZE / 1024 / 1024);
+            char num[12];
+            int i = 0;
+            if (mib == 0) { num[i++] = '0'; }
+            else {
+                uint32_t tmp = mib;
+                char rev[12];
+                int j = 0;
+                while (tmp > 0) { rev[j++] = '0' + (tmp % 10); tmp /= 10; }
+                while (j > 0) num[i++] = rev[--j];
+            }
+            num[i] = '\0';
+            wm_print(sysinfo_win, num);
+            wm_print(sysinfo_win, " MiB\n");
+        }
+
+        /* Task list */
+        wm_print(sysinfo_win, "\n Tasks:\n");
+        {
+            const char* state_names[] = { "READY", "RUN", "BLOCK", "DEAD" };
+            task_t* table = task_get_table();
+            for (int i = 0; i < MAX_TASKS; i++) {
+                if (table[i].state == TASK_DEAD && table[i].id == 0 && i != 0) continue;
+                if (table[i].name[0] == '\0') continue;
+                wm_print(sysinfo_win, "  ");
+                wm_print(sysinfo_win, table[i].name);
+                wm_print(sysinfo_win, " [");
+                const char* st = (table[i].state <= TASK_DEAD)
+                                 ? state_names[table[i].state] : "???";
+                wm_print(sysinfo_win, st);
+                wm_print(sysinfo_win, "]\n");
+            }
+        }
+
+        wm_render_all();
+
+        /* Update roughly every second (yield ~100 times at 100 Hz) */
+        for (int i = 0; i < 100; i++) {
+            task_yield();
+        }
+    }
+}
 
 void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     /* -----------------------------------------------------------------------
@@ -169,6 +299,34 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
             heap_get_size() / 1024, heap_start);
 
     /* -----------------------------------------------------------------------
+     * Framebuffer — try to initialize VESA graphics mode.
+     * The bootloader may or may not have set up a framebuffer depending on
+     * hardware support. If it did, we switch to graphical mode with windows.
+     * If not, we stay in VGA text mode and the shell works the same as before.
+     *
+     * ANALOGY: Think of this as checking if your monitor supports HD. If yes,
+     * we switch to a nice graphical desktop. If not, we keep using the basic
+     * text terminal — everything still works, just looks different.
+     * ----------------------------------------------------------------------- */
+    multiboot_info_t* mboot = (multiboot_info_t*)mboot_addr;
+    int gui_mode = fb_init(mboot);
+
+    if (gui_mode) {
+        vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+        vga_print("[OK] ");
+        vga_set_color(VGA_WHITE, VGA_BLACK);
+        kprintf("Framebuffer: %ux%ux%u at 0x%x\n",
+                fb_get_width(), fb_get_height(), 32,
+                (uint32_t)mboot->framebuffer_addr);
+
+        wm_init();
+        vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
+        vga_print("[OK] ");
+        vga_set_color(VGA_WHITE, VGA_BLACK);
+        vga_print("Window manager initialized\n");
+    }
+
+    /* -----------------------------------------------------------------------
      * Multitasking — register kernel_main as task 0, enable scheduler
      * ----------------------------------------------------------------------- */
     task_init();
@@ -192,9 +350,30 @@ void kernel_main(uint32_t magic, uint32_t mboot_addr) {
     __asm__ __volatile__ ("sti");
 
     /* -----------------------------------------------------------------------
-     * Launch the shell as a separate task
+     * Set up GUI windows and launch tasks
      * ----------------------------------------------------------------------- */
-    task_create("shell", shell_run);
+    if (gui_mode) {
+        /* Create windows: shell on the left, system info on the right.
+         * Layout for 1024x768:
+         *   Shell:    (10, 10)  — 640x748
+         *   SysInfo:  (660, 10) — 354x748
+         */
+        window_t* shell_win = wm_create_window(10, 10, 640, 748, "Shell");
+        sysinfo_win = wm_create_window(660, 10, 354, 748, "System Info");
+
+        /* Point the shell at its window */
+        shell_set_window(shell_win);
+
+        /* Initial render so the user sees something immediately */
+        wm_render_all();
+
+        /* Launch tasks */
+        task_create("shell", shell_run);
+        task_create("sysinfo", sysinfo_task);
+    } else {
+        /* VGA text mode — just launch the shell */
+        task_create("shell", shell_run);
+    }
 
     /* -----------------------------------------------------------------------
      * kernel_main becomes the idle task — it just halts between interrupts.

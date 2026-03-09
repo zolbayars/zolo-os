@@ -7,6 +7,8 @@
 #include "pmm.h"
 #include "heap.h"
 #include "task.h"
+#include "fb.h"
+#include "wm.h"
 #include "types.h"
 
 /* =============================================================================
@@ -63,6 +65,52 @@ static shell_command_t commands[] = {
     { "reboot",  "Reboot the system",                  cmd_reboot  },
 };
 
+/* The shell's window (set by shell_set_window, NULL if in VGA text mode) */
+static window_t* shell_window = NULL;
+
+/* ---------------------------------------------------------------------------
+ * shell_set_window — Assign a GUI window for the shell to render into.
+ * When set, the shell writes to the window's text console instead of VGA.
+ * Pass NULL to revert to VGA text mode.
+ * --------------------------------------------------------------------------- */
+void shell_set_window(void* win) {
+    shell_window = (window_t*)win;
+}
+
+/* ---------------------------------------------------------------------------
+ * Shell output helpers — abstract over VGA text mode vs framebuffer
+ *
+ * In VGA text mode, we call vga_putchar/vga_print directly.
+ * In framebuffer mode, we write to the shell's window and re-render.
+ * --------------------------------------------------------------------------- */
+static void shell_putchar(char c) {
+    if (shell_window) {
+        wm_putchar(shell_window, c);
+    } else {
+        vga_putchar(c);
+    }
+}
+
+static void shell_print(const char* s) {
+    if (shell_window) {
+        wm_print(shell_window, s);
+    } else {
+        vga_print(s);
+    }
+}
+
+/* Called from kprintf via the putchar hook when shell is active in GUI mode */
+static void shell_kprintf_putchar(char c) {
+    shell_putchar(c);
+}
+
+/* Refresh the screen after output — only needed in GUI mode */
+static void shell_refresh(void) {
+    if (shell_window) {
+        wm_render_all();
+    }
+}
+
 #define NUM_COMMANDS (sizeof(commands) / sizeof(commands[0]))
 
 /* ---------------------------------------------------------------------------
@@ -79,19 +127,22 @@ static int shell_read_line(char* buf, int max_len) {
 
         if (c == '\n') {
             /* Enter pressed — finish the line */
-            vga_putchar('\n');
+            shell_putchar('\n');
+            shell_refresh();
             buf[pos] = '\0';
             return pos;
         } else if (c == '\b') {
             /* Backspace — erase one character */
             if (pos > 0) {
                 pos--;
-                vga_putchar('\b');
+                shell_putchar('\b');
+                shell_refresh();
             }
         } else if (c >= ' ' && c <= '~') {
             /* Printable character — add to buffer and echo */
             buf[pos++] = c;
-            vga_putchar(c);
+            shell_putchar(c);
+            shell_refresh();
         }
         /* Ignore non-printable characters (arrow keys, etc.) */
     }
@@ -140,9 +191,7 @@ static void shell_execute(int argc, char* argv[]) {
     }
 
     /* Command not found */
-    vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
     kprintf("Unknown command: '%s'. Type 'help' for a list.\n", argv[0]);
-    vga_set_color(VGA_WHITE, VGA_BLACK);
 }
 
 /* ---------------------------------------------------------------------------
@@ -152,15 +201,18 @@ void shell_run(void) {
     char line[MAX_LINE];
     char* argv[MAX_ARGS];
 
-    vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-    vga_print("\nZoloOS Shell — type 'help' for commands\n\n");
+    /* If in GUI mode, redirect kprintf output through our window */
+    if (shell_window) {
+        kprintf_set_putchar(shell_kprintf_putchar);
+    }
+
+    shell_print("ZoloOS Shell\nType 'help' for commands\n\n");
+    shell_refresh();
 
     for (;;) {
         /* Print prompt */
-        vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
-        vga_print("zolo");
-        vga_set_color(VGA_WHITE, VGA_BLACK);
-        vga_print("> ");
+        shell_print("zolo> ");
+        shell_refresh();
 
         /* Read a line */
         shell_read_line(line, MAX_LINE);
@@ -168,6 +220,7 @@ void shell_run(void) {
         /* Parse and execute */
         int argc = shell_tokenize(line, argv, MAX_ARGS);
         shell_execute(argc, argv);
+        shell_refresh();
     }
 }
 
@@ -179,32 +232,31 @@ void shell_run(void) {
 static void cmd_help(int argc, char* argv[]) {
     (void)argc; (void)argv;
 
-    vga_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_print("Available commands:\n");
-    vga_set_color(VGA_WHITE, VGA_BLACK);
-
+    shell_print("Available commands:\n");
     for (uint32_t i = 0; i < NUM_COMMANDS; i++) {
-        vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-        kprintf("  %-10s", commands[i].name);
-        vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-        kprintf(" %s\n", commands[i].description);
+        kprintf("  %-10s %s\n", commands[i].name, commands[i].description);
     }
-    vga_set_color(VGA_WHITE, VGA_BLACK);
 }
 
 /* clear — wipe the screen */
 static void cmd_clear(int argc, char* argv[]) {
     (void)argc; (void)argv;
-    vga_clear();
+    if (shell_window) {
+        wm_clear(shell_window);
+        wm_render_all();
+    } else {
+        vga_clear();
+    }
 }
 
 /* echo — print arguments */
 static void cmd_echo(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
-        if (i > 1) vga_putchar(' ');
-        vga_print(argv[i]);
+        if (i > 1) shell_putchar(' ');
+        shell_print(argv[i]);
     }
-    vga_putchar('\n');
+    shell_putchar('\n');
+    shell_refresh();
 }
 
 /* meminfo — show physical + heap memory status */
@@ -215,9 +267,7 @@ static void cmd_meminfo(int argc, char* argv[]) {
     uint32_t free_frames  = pmm_get_free_count();
     uint32_t used_frames  = total_frames - free_frames;
 
-    vga_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_print("Physical Memory:\n");
-    vga_set_color(VGA_WHITE, VGA_BLACK);
+    shell_print("Physical Memory:\n");
     kprintf("  Total:  %u frames (%u MiB)\n",
             total_frames,
             (uint32_t)((uint64_t)total_frames * FRAME_SIZE / 1024 / 1024));
@@ -228,12 +278,11 @@ static void cmd_meminfo(int argc, char* argv[]) {
             free_frames,
             (uint32_t)((uint64_t)free_frames * FRAME_SIZE / 1024 / 1024));
 
-    vga_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_print("Kernel Heap:\n");
-    vga_set_color(VGA_WHITE, VGA_BLACK);
+    shell_print("Kernel Heap:\n");
     kprintf("  Size:   %u KiB\n", heap_get_size() / 1024);
     kprintf("  Used:   %u bytes\n", heap_get_used());
     kprintf("  Free:   %u bytes\n", heap_get_size() - heap_get_used());
+    shell_refresh();
 }
 
 /* uptime — show seconds since boot */
@@ -256,9 +305,7 @@ static void cmd_tasks(int argc, char* argv[]) {
     const char* state_names[] = { "READY", "RUNNING", "BLOCKED", "DEAD" };
     task_t* table = task_get_table();
 
-    vga_set_color(VGA_YELLOW, VGA_BLACK);
     kprintf("  %-4s %-16s %s\n", "ID", "Name", "State");
-    vga_set_color(VGA_WHITE, VGA_BLACK);
 
     for (int i = 0; i < MAX_TASKS; i++) {
         if (table[i].state == TASK_DEAD && table[i].id == 0 && i != 0) continue;
@@ -268,6 +315,7 @@ static void cmd_tasks(int argc, char* argv[]) {
                             ? state_names[table[i].state] : "???";
         kprintf("  %-4u %-16s %s\n", table[i].id, table[i].name, state);
     }
+    shell_refresh();
 }
 
 /* reboot — triple fault to restart the CPU.
@@ -279,8 +327,8 @@ static void cmd_tasks(int argc, char* argv[]) {
 static void cmd_reboot(int argc, char* argv[]) {
     (void)argc; (void)argv;
 
-    vga_set_color(VGA_YELLOW, VGA_BLACK);
-    vga_print("Rebooting...\n");
+    shell_print("Rebooting...\n");
+    shell_refresh();
 
     /* Load a zero-length IDT — any interrupt will now triple-fault */
     uint8_t null_idt[6] = {0};
