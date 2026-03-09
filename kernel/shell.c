@@ -201,6 +201,11 @@ void shell_run(void) {
     char line[MAX_LINE];
     char* argv[MAX_ARGS];
 
+    /* Ensure interrupts are on even if this task was first scheduled from
+     * an interrupt handler (where IF is cleared). Think of it as flipping
+     * the house breaker back on so the keyboard "doorbell" can ring. */
+    __asm__ __volatile__("sti");
+
     /* If in GUI mode, redirect kprintf output through our window */
     if (shell_window) {
         kprintf_set_putchar(shell_kprintf_putchar);

@@ -68,6 +68,12 @@
 static window_t* sysinfo_win = NULL;
 
 static void sysinfo_task(void) {
+    /* If this task starts because the timer preempted another task, IF was
+     * cleared on entry. Turn interrupts back on so future timer/keyboard
+     * signals keep arriving — like reopening the office door after stepping
+     * out for a fire drill. */
+    __asm__ __volatile__("sti");
+
     for (;;) {
         if (!sysinfo_win) {
             task_yield();
