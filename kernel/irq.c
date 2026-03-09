@@ -145,16 +145,20 @@ void irq_handler(interrupt_frame_t* frame) {
      * (e.g. int_no=32 → IRQ0, int_no=33 → IRQ1) */
     uint8_t irq = (uint8_t)(frame->int_no - PIC1_OFFSET);
 
+    /* Send EOI BEFORE calling the handler.
+     *
+     * Why? The timer callback calls task_schedule(), which may context-switch
+     * to a different task. If we haven't sent EOI yet, the PIC thinks we're
+     * still handling this IRQ and won't fire it again. Since the scheduler
+     * needs timer interrupts to preempt tasks (and the keyboard needs IRQ1),
+     * delaying the EOI can starve future interrupts. */
+    if (irq >= 8) {
+        outb(PIC2_CMD, PIC_EOI);
+    }
+    outb(PIC1_CMD, PIC_EOI);
+
     /* Call the registered handler if one exists */
     if (irq_handlers[irq]) {
         irq_handlers[irq](frame);
     }
-
-    /* Send EOI to slave PIC first (if the IRQ came from the slave, IRQ 8-15) */
-    if (irq >= 8) {
-        outb(PIC2_CMD, PIC_EOI);
-    }
-
-    /* Always send EOI to the master PIC */
-    outb(PIC1_CMD, PIC_EOI);
 }
